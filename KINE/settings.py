@@ -147,9 +147,10 @@ EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "sreeja.bommana1123@gmail.com"
+import os
 
-EMAIL_HOST_PASSWORD = "khwojtrimrhdgmeb"  # Google App password (16-char)
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD") # Google App password (16-char)
 FAST2SMS_API_KEY = "Sv9MoCRq6tuT4Fla1erpJxWdIOE08LNhfbBQwnyYKiXzm5cUV2Fg7zHGLd0k4T6b5tADsjcOW1fYwBXh"
 
 
