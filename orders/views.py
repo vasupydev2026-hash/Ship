@@ -14,28 +14,35 @@ from django.shortcuts import render, redirect
 from decimal import Decimal, ROUND_HALF_UP
 from django.http import HttpResponse
 from django.template.loader import get_template
+from django.http import HttpResponse
+from django.template.loader import render_to_string
 from weasyprint import HTML
 from .models import Order
 
 def download_invoice(request, order_code):
+    # Fetch order
     order = Order.objects.select_related(
         "address", "user"
     ).prefetch_related("items").get(order_code=order_code)
 
     items = order.items.exclude(status__in=["cancelled", "returned"])
 
-    template = get_template("orders/invoice.html")  # ✅ FIXED PATH
-    html = template.render({
+    # Render HTML template to string
+    html_string = render_to_string("orders/invoice.html", {
         "order": order,
         "items": items
     })
 
-    response = HttpResponse(content_type="application/pdf")
+    # Generate PDF
+    html = HTML(string=html_string)
+    pdf = html.write_pdf()
+
+    # Create response
+    response = HttpResponse(pdf, content_type="application/pdf")
     response["Content-Disposition"] = (
         f'attachment; filename="invoice_{order.order_code}.pdf"'
     )
 
-    pisa.CreatePDF(html, dest=response)
     return response
 
 
