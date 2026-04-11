@@ -536,18 +536,18 @@ def razorpay_payment_success(request):
 
     shiprocket_response = create_shiprocket_order(order)
 
-    if shiprocket_response.get("status_code") == 1:
-        shipment_id = shiprocket_response.get("shipment_id")
-
-        awb_response = assign_courier_awb(shipment_id)
-
-        if awb_response.get("awb_code"):
-            order.tracking_id = awb_response["awb_code"]
-            order.courier_name = awb_response.get("courier_name")
-            order.shipping_status = "shipped"
-            order.save()
-
-            print("✅ AWB GENERATED:", order.tracking_id)
+    # if shiprocket_response.get("status_code") == 1:
+    #     shipment_id = shiprocket_response.get("shipment_id")
+    #
+    #     awb_response = assign_courier_awb(shipment_id)
+    #
+    #     if awb_response.get("awb_code"):
+    #         order.tracking_id = awb_response["awb_code"]
+    #         order.courier_name = awb_response.get("courier_name")
+    #         order.shipping_status = "shipped"
+    #         order.save()
+    #
+    #         print("✅ AWB GENERATED:", order.tracking_id)
     print(shiprocket_response)
 
     return JsonResponse({"message": "Order placed successfully"})
