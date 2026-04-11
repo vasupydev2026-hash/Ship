@@ -344,7 +344,7 @@ def razorpay_payment(request):
     ).filter(user=user, id__in=selected_items)
 
     if not cart_items.exists():
-        return redirect("cartPage")
+        return redirect("cartPage:cartPage")
 
     selected_address = Address.objects.filter(
         id=selected_address_id,
@@ -418,7 +418,7 @@ import razorpay
 @transaction.atomic
 def razorpay_payment_success(request):
     if request.method != "POST":
-        return redirect("cartPage")
+        return redirect("cartPage:cartPage")
 
     user = request.user
 
@@ -455,14 +455,14 @@ def razorpay_payment_success(request):
     selected_address_id = request.session.get("selected_address")
 
     if not selected_items or not selected_address_id:
-        return redirect("cartPage")
+        return redirect("cartPage:cartPage")
 
     cart_items = CartItem.objects.select_related(
         "product", "size"
     ).filter(user=user, id__in=selected_items)
 
     if not cart_items.exists():
-        return redirect("cartPage")
+        return redirect("cartPage:cartPage")
 
     address = Address.objects.get(id=selected_address_id, user=user)
 
