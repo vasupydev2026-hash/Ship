@@ -14,7 +14,7 @@ from django.shortcuts import render, redirect
 from decimal import Decimal, ROUND_HALF_UP
 from django.http import HttpResponse
 from django.template.loader import get_template
-from xhtml2pdf import pisa
+from weasyprint import HTML,
 from .models import Order
 
 def download_invoice(request, order_code):
