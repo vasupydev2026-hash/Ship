@@ -165,13 +165,28 @@ RAZORPAY_KEY_SECRET = "9WED8m2OuuAJv8VpKGrurJ5M"
 #
 # db.models.BigAutoField'
 
+# # settings.py
+# DELHIVERY_API_TOKEN = "5dcd6d9356c7a9bf624f1b536094f23471a00a45"
+# DELHIVERY_BASE_URL = "https://track.delhivery.com"
+#
+# DELHIVERY_PICKUP_LOCATION = "PRIMARY"
+# # ⚠️ Must EXACTLY match Delhivery dashboard pickup name
+#
+# DELHIVERY_RETURN_ADDRESS_ID = ""  # optional for now
+# DELHIVERY_MODE = "test"
+#
 # settings.py
-DELHIVERY_API_TOKEN = "5dcd6d9356c7a9bf624f1b536094f23471a00a45"
-DELHIVERY_BASE_URL = "https://track.delhivery.com"
 
-DELHIVERY_PICKUP_LOCATION = "PRIMARY"
-# ⚠️ Must EXACTLY match Delhivery dashboard pickup name
+SHIPROCKET_EMAIL = "agvasup123@gmail.com"
+SHIPROCKET_PASSWORD = "tRJW4X%e&AceGABy0%8gndOFE60bZpJl"
 
-DELHIVERY_RETURN_ADDRESS_ID = ""  # optional for now
-DELHIVERY_MODE = "test"
-
+# Redis cache (for token)
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
