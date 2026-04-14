@@ -4,7 +4,7 @@ from address.models import Address
 from app.models import Product, Size
 import uuid
 from decimal import Decimal
-
+from cartPage.models import TaxesAndCharges
 
 # =========================
 # ORDER
@@ -99,39 +99,48 @@ class Order(models.Model):
             self.status = new_status
             self.save(update_fields=["status", "updated_at"])
 
-
-
-    # ---------- Methods ----------
     def recalculate_totals(self):
-        """
-        Recalculate order totals based on active (non-cancelled, non-returned) items
-        and apply refunds from approved ReturnRequests
-        """
         active_items = self.items.exclude(status__in=['cancelled', 'returned'])
         subtotal = sum(item.price * item.quantity for item in active_items)
 
-        tax = (subtotal * Decimal('0.05')).quantize(Decimal('0.01'))  # 5% tax
-        delivery = Decimal('50.00') if subtotal > 0 else Decimal('0.00')
+        tax_obj = TaxesAndCharges.objects.first()
+
+        tax_rate = Decimal(tax_obj.tax) if tax_obj else Decimal("0.00")
+        delivery = Decimal(tax_obj.delivery_charges) if tax_obj else Decimal("0.00")
+        min_free = Decimal(tax_obj.min_amount_for_free_delivery) if tax_obj else Decimal("0.00")
+
+        # tax
+        tax = (subtotal * tax_rate / Decimal("100")).quantize(Decimal("0.01"))
+
+        # ✅ FREE DELIVERY LOGIC FIX
+        if subtotal >= min_free:
+            delivery = Decimal("0.00")
+
         grand_total = subtotal + tax + delivery
 
-        # Subtract refunded amounts
-        total_refunds = sum(r.refund_amount for r in self.return_requests.filter(status='refunded'))
+        total_refunds = sum(
+            r.refund_amount for r in self.return_requests.filter(status='refunded')
+        )
+
         grand_total -= total_refunds
 
         self.total_amount = subtotal
         self.tax_amount = tax
         self.delivery_charges = delivery
-        self.grand_total = max(grand_total, Decimal("0.00"))  # never negative
+        self.grand_total = max(grand_total, Decimal("0.00"))
 
-        # If fully cancelled/returned, mark order cancelled
-        if grand_total <= 0:
+        if self.grand_total <= 0:
             self.status = 'cancelled'
 
         self.save(update_fields=[
-            'total_amount', 'tax_amount', 'delivery_charges', 'grand_total', 'status', 'updated_at'
+            'total_amount',
+            'tax_amount',
+            'delivery_charges',
+            'grand_total',
+            'status',
+            'updated_at'
         ])
 
-        # Return dict for use in AJAX responses
         return {
             "total_amount": float(self.total_amount),
             "tax_amount": float(self.tax_amount),
@@ -140,24 +149,6 @@ class Order(models.Model):
             "total_refunds": float(total_refunds),
         }
 
-    def save(self, *args, **kwargs):
-        if not self.order_code:
-            self.order_code = uuid.uuid4().hex[:12].upper()
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.order_code
-
-    class Meta:
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['order_code']),
-            models.Index(fields=['user']),
-            models.Index(fields=['created_at']),
-        ]
-
-
-# =========================
 # ORDER ITEM
 # =========================
 class OrderItem(models.Model):
@@ -178,8 +169,8 @@ class OrderItem(models.Model):
         on_delete=models.CASCADE
     )
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True)
-    # product_name = models.CharField(product.name,default='Name')
-    product_name = models.CharField(max_length=255)
+    product_name = models.CharField(product.name,default='Name')
+    # product_name = models.CharField(max_length=255)
 
     product_sku = models.CharField(max_length=100, blank=True)
     size = models.ForeignKey(Size, null=True, blank=True, on_delete=models.SET_NULL)

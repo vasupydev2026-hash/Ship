@@ -3,6 +3,7 @@ from .models import Order, OrderItem ,ReturnRequest
 
 
 # --- Inline Order Items inside Order Admin ---
+
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 0
@@ -11,6 +12,7 @@ class OrderItemInline(admin.TabularInline):
 
 
 # --- Order Admin ---
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = (

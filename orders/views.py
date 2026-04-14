@@ -114,6 +114,8 @@ def confirm_order(request):
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
 
+    print("🟡 CONFIRM PAGE DATA:", total_price, taxes, delivery_charge)
+
     # ---------------- ADDRESS ----------------
     selected_address = Address.objects.filter(
         user=request.user,
@@ -183,7 +185,7 @@ def place_confirm_order(request):
     # -----------------------------
     # PRICE CALCULATION
     # -----------------------------
-    tax_obj = TaxesAndCharges.objects.first()
+    tax_obj = TaxesAndCharges.objects.last()
     tax_rate = Decimal(tax_obj.tax) if tax_obj else Decimal("0.00")
     delivery_charge = Decimal(tax_obj.delivery_charges) if tax_obj else Decimal("0.00")
     min_free_delivery = Decimal(tax_obj.min_amount_for_free_delivery) if tax_obj else Decimal("0.00")
@@ -195,6 +197,8 @@ def place_confirm_order(request):
         delivery_charge = Decimal("0.00")
 
     total_amount = (subtotal + taxes + delivery_charge).quantize(Decimal("0.01"))
+
+    print("🔥 COD ORDER DATA:", total_amount, taxes, delivery_charge)
 
     # -----------------------------
     # CREATE ORDER
@@ -373,6 +377,7 @@ def razorpay_payment(request):
     # -----------------------------
     # CREATE RAZORPAY ORDER (ONLY)
     # -----------------------------
+
     razorpay_order = client.order.create({
         "amount": amount_paise,
         "currency": "INR",
@@ -469,19 +474,19 @@ def razorpay_payment_success(request):
     # -------------------------------
     # 💰 PRICE CALCULATION
     # -------------------------------
-    tax_obj = TaxesAndCharges.objects.first()
+    tax_obj = TaxesAndCharges.objects.last()
     tax_rate = Decimal(tax_obj.tax) if tax_obj else Decimal("0.00")
     delivery_charge = Decimal(tax_obj.delivery_charges) if tax_obj else Decimal("0.00")
     free_delivery_min = Decimal(tax_obj.min_amount_for_free_delivery) if tax_obj else Decimal("0.00")
 
-    subtotal = sum(Decimal(item.price) * item.quantity for item in cart_items)
+    subtotal = sum(Decimal(str(item.price)) * item.quantity for item in cart_items)
     tax_amount = (subtotal * tax_rate / Decimal("100")).quantize(Decimal("0.01"))
-
     if subtotal >= free_delivery_min:
         delivery_charge = Decimal("0.00")
 
     total_amount = (subtotal + tax_amount + delivery_charge).quantize(Decimal("0.01"))
 
+    print("🔥 RAZORPAY ORDER DATA:", total_amount, tax_amount, delivery_charge)
     # -------------------------------
     # 🧾 CREATE ORDER (ONLY HERE ✅)
     # -------------------------------
@@ -503,6 +508,7 @@ def razorpay_payment_success(request):
     # -------------------------------
     # 📦 ORDER ITEMS + STOCK LOCK
     # -------------------------------
+
     for item in cart_items:
         stock = ProductStock.objects.select_for_update().get(
             product=item.product,
@@ -548,9 +554,10 @@ def razorpay_payment_success(request):
     #         order.save()
     #
     #         print("✅ AWB GENERATED:", order.tracking_id)
-    print(shiprocket_response)
 
-    return JsonResponse({"message": "Order placed successfully"})
+    # print(shiprocket_response)
+    #
+    # return JsonResponse({"message": "Order placed successfully"})
 
     # -------------------------------
     # 📧 CONFIRMATION EMAIL
@@ -569,15 +576,11 @@ def razorpay_payment_success(request):
     ]:
         request.session.pop(key, None)
 
-    # -------------------------------
-    # ✅ SUCCESS
-    # -------------------------------
-    # return render(request, "orders/payment_success.html", {
-    #     "order": order
-    # }
-    # -------------------------------
+
+# -------------------------------
 # ✅ SUCCESS
 # -------------------------------
+
     return redirect("order_success")
 
     
@@ -1129,3 +1132,5 @@ def assign_courier_awb_dummy(order):
         "awb_code": fake_awb,
         "courier_name": "ShippRocket"
     }
+
+
