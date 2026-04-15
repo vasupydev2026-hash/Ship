@@ -285,6 +285,7 @@ def payment_success(request):
 
 @login_required
 def order_success(request):
+    tax_per = TaxesAndCharges.tax
     latest_order = (
         Order.objects
         .filter(user=request.user)
@@ -296,7 +297,8 @@ def order_success(request):
         return redirect("home")
 
     return render(request, "orders/order_success.html", {
-        "order": latest_order
+        "order": latest_order,
+        "tax_per":tax_per
     })
 
 

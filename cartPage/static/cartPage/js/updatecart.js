@@ -45,6 +45,7 @@ function bindEvents() {
 // ===============================
 // ADDRESS DROPDOWN
 // ===============================
+
 function setupAddressDropdown() {
     const select = document.getElementById("selected_address");
     if (!select) return;

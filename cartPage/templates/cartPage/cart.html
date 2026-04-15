@@ -413,30 +413,6 @@
             </div>
 
     </div>
-
-<!-- ✅ KEEP ONLY ADDRESS DROPDOWN JS -->
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-    const select = document.getElementById("selected_address");
-    if (!select) return;
-
-    const selected = select.querySelector(".selected-option");
-    const options = select.querySelector(".options");
-    const hiddenInput = document.getElementById("selected_address_input");
-
-    selected.addEventListener("click", () => {
-        options.style.display = options.style.display === "block" ? "none" : "block";
-    });
-
-    options.querySelectorAll(".option").forEach(opt => {
-        opt.addEventListener("click", () => {
-            selected.innerHTML = opt.innerHTML;
-            hiddenInput.value = opt.dataset.id;
-            options.style.display = "none";
-        });
-    });
-});
-</script>
 </body>
 </html>
 {% endblock %}
