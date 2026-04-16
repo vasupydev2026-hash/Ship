@@ -21,51 +21,32 @@ def add_event(shipment, status, description):
 # =========================================================
 # 🚚 CREATE SHIPMENT (MAIN TASK)
 # =========================================================
-@shared_task(bind=True, max_retries=3)
-def process_shipping(self, order_id):
-    print("🔥 TASK STARTED:", order_id)
+# shipping/tasks.py
+from celery import shared_task
+import time
 
-    try:
-        order = Order.objects.get(id=order_id)
+@shared_task
+def process_shipping(shipment_id):
+    shipment = Shipment.objects.get(id=shipment_id)
 
-        # ✅ Prevent duplicate shipments
-        shipment, created = Shipment.objects.get_or_create(order=order)
+    steps = [
+        ("assigned", "Order assigned to courier"),
+        ("shipped", "Package shipped"),
+        ("out_for_delivery", "Out for delivery"),
+        ("delivered", "Package delivered"),
+    ]
 
-        if created:
-            print(f"✅ New shipment created for Order {order.id}")
-        else:
-            print(f"🔁 Updating existing shipment for Order {order.id}")
+    for status, desc in steps:
+        time.sleep(10)  # simulate delay
 
-        shipment.shipment_id = f"MOCK-SHIP-{order.id}"
-        shipment.awb_code = f"AWB{order.id}"
-        shipment.status = "created"
-        # ✅ Assign stable mock data
-        shipment.courier_name = random.choice([
-            "Delhivery", "BlueDart", "XpressBees"
-        ])
-        shipment.courier_id = random.randint(1000, 9999)
-
-        # ✅ IMPORTANT: Stable AWB (no random for production logic)
-
-        # ❌ Do NOT store full URL (generate dynamically in admin/view)
-
+        shipment.status = status
         shipment.save()
 
-        print(f"✅ Shipment created for Order {order.id}")
-
-        # ✅ Add first event
-        add_event(shipment, "created", "Order placed")
-
-        # ✅ Trigger async status updates (no sleep here)
-        update_to_assigned.apply_async((shipment.id,), countdown=5)
-
-    except Order.DoesNotExist:
-        print(f"❌ Order {order_id} not found")
-    except Exception as e:
-        print("❌ ERROR:", str(e))
-        raise self.retry(exc=e, countdown=5)
-
-
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            status=status,
+            description=desc
+        )
 # =========================================================
 # 📦 STEP 1 → ASSIGNED
 # =========================================================

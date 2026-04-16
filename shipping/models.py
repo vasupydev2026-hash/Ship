@@ -3,6 +3,13 @@
 from django.db import models
 from orders.models import Order
 
+class DeliveryAgent(models.Model):
+    name = models.CharField(max_length=100)
+    phone = models.CharField(max_length=15)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+
+
 class Shipment(models.Model):
     order = models.OneToOneField(Order, on_delete=models.CASCADE)
 
@@ -14,6 +21,8 @@ class Shipment(models.Model):
 
     awb_code = models.CharField(max_length=100, null=True)
     tracking_url = models.URLField(null=True)
+
+    agent = models.ForeignKey(DeliveryAgent, on_delete=models.SET_NULL, null=True)
 
     status = models.CharField(max_length=50, default="created")
 
@@ -31,3 +40,6 @@ class ShipmentEvent(models.Model):
 
     def __str__(self):
         return f"{self.shipment.order} - {self.status}"
+
+
+

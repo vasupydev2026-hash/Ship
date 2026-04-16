@@ -11,16 +11,15 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 900px;
             margin: auto;
             background: white;
             padding: 25px;
             border-radius: 10px;
         }
 
-        .header {
+        h2 {
             text-align: center;
-            margin-bottom: 20px;
         }
 
         .status {
@@ -30,21 +29,23 @@
             font-weight: bold;
         }
 
-        /* ================= PROGRESS BAR ================= */
+        .status.delivered { color: green; }
+        .status.shipped { color: orange; }
+        .status.assigned { color: blue; }
+        .status.processing { color: gray; }
+
+        /* ===== Progress Bar ===== */
 
         .progress-container {
             display: flex;
             align-items: center;
-            justify-content: space-between;
             margin: 40px 0;
-            position: relative;
         }
 
         .step-wrapper {
             display: flex;
             align-items: center;
             flex: 1;
-            position: relative;
         }
 
         .circle {
@@ -56,73 +57,25 @@
             text-align: center;
             line-height: 35px;
             font-weight: bold;
-            z-index: 2;
-            transition: 0.3s;
         }
 
-        .circle.active {
-            background: #28a745;
-        }
+        .circle.active { background: green; }
 
         .line {
             height: 5px;
-            background: #ccc;
             flex: 1;
-            margin: 0 10px;
-            z-index: 1;
-            transition: 0.3s;
+            background: #ccc;
         }
 
-        .active-line {
-            background: #28a745;
-        }
+        .line.active { background: green; }
 
-        .label {
-            position: absolute;
-            top: 45px;
-            left: -30px;
-            width: 100px;
-            text-align: center;
-            font-size: 13px;
-        }
-
-        /* ================= TIMELINE ================= */
-
-        .timeline {
-            margin-top: 30px;
-        }
-
-        .timeline h3 {
-            margin-bottom: 15px;
-        }
+        /* ===== Timeline ===== */
 
         .event {
             border-left: 3px solid #007bff;
             padding-left: 10px;
             margin-bottom: 15px;
-            position: relative;
         }
-
-        .event::before {
-            content: "";
-            width: 10px;
-            height: 10px;
-            background: #007bff;
-            border-radius: 50%;
-            position: absolute;
-            left: -6px;
-            top: 5px;
-        }
-
-        .event small {
-            color: gray;
-        }
-
-        /* ================= STATUS COLORS ================= */
-
-        .delivered { color: green; }
-        .shipped { color: orange; }
-        .processing { color: blue; }
 
     </style>
 </head>
@@ -131,67 +84,81 @@
 
 <div class="container">
 
-    <div class="header">
-        <h2>📦 Track Your Order</h2>
-    </div>
+    <h2>📦 Track Order</h2>
 
-    <p><strong>Order ID:</strong> {{ shipment.order.id }}</p>
-    <p><strong>AWB:</strong> {{ shipment.awb_code }}</p>
-    <p><strong>Courier:</strong> {{ shipment.courier_name }}</p>
+    <p><b>Order ID:</b> {{ shipment.order.id }}</p>
+    <p><b>AWB:</b> {{ shipment.awb_code }}</p>
 
     <!-- STATUS -->
-    <div class="status">
-        {% if shipment.status == "delivered" %}
-            <span class="delivered">✅ Delivered</span>
-        {% elif shipment.status == "shipped" %}
-            <span class="shipped">🚚 Shipped</span>
-        {% elif shipment.status == "assigned" %}
-            <span class="processing">📦 Assigned</span>
-        {% else %}
-            <span class="processing">📦 Processing</span>
-        {% endif %}
+    <div id="statusBox" class="status {{ shipment.status }}">
+        {{ shipment.status|title }}
     </div>
 
-    <!-- ================= PROGRESS BAR ================= -->
-
+    <!-- PROGRESS BAR -->
     <div class="progress-container">
         {% for step in status_flow %}
             <div class="step-wrapper">
 
-                <!-- Circle -->
                 <div class="circle {% if forloop.counter0 <= current_index %}active{% endif %}">
                     {{ forloop.counter }}
                 </div>
 
-                <!-- Label -->
-                <p class="label">{{ step|title }}</p>
-
-                <!-- Line -->
                 {% if not forloop.last %}
-                    <div class="line {% if forloop.counter0 < current_index %}active-line{% endif %}"></div>
+                    <div class="line {% if forloop.counter0 < current_index %}active{% endif %}"></div>
                 {% endif %}
 
             </div>
         {% endfor %}
     </div>
 
-    <!-- ================= TIMELINE ================= -->
-
-    <div class="timeline">
-        <h3>🚚 Tracking Timeline</h3>
-
+    <!-- TIMELINE -->
+    <h3>🚚 Timeline</h3>
+    <div id="timeline">
         {% for event in events %}
             <div class="event">
                 <strong>{{ event.status|title }}</strong><br>
-                {{ event.description }}<br>
-                <small>{{ event.created_at }}</small>
+                {{ event.description }}
             </div>
-        {% empty %}
-            <p>No updates yet</p>
         {% endfor %}
     </div>
 
 </div>
+
+<script>
+let lastEventCount = {{ events|length }};
+
+// 🔄 POLLING (REAL-TIME FEEL)
+setInterval(updateTracking, 5000);
+
+function updateTracking() {
+    fetch("/shipping/api/track/{{ shipment.awb_code }}/")
+        .then(res => res.json())
+        .then(data => {
+
+            // ✅ Update STATUS
+            let statusBox = document.getElementById("statusBox");
+            statusBox.className = "status " + data.status;
+            statusBox.innerText = data.status.toUpperCase();
+
+            // ✅ Update TIMELINE only if new event
+            if (data.events.length > lastEventCount) {
+
+                let timeline = document.getElementById("timeline");
+                let newEvent = data.events[data.events.length - 1];
+
+                timeline.innerHTML += `
+                    <div class="event">
+                        <strong>${newEvent.status}</strong><br>
+                        ${newEvent.description}
+                    </div>
+                `;
+
+                lastEventCount = data.events.length;
+            }
+        })
+        .catch(err => console.error("Tracking error:", err));
+}
+</script>
 
 </body>
 </html>
