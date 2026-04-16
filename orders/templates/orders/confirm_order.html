@@ -99,7 +99,7 @@
                     {% if selected_address.address2 %}, {{ selected_address.address2 }}{% endif %}
                 </p>
                 <p>
-                    {{ selected_address.cityc }},
+                    {{ selected_address.city }},
                     {{ selected_address.state }},
                     {{ selected_address.country }} - {{ selected_address.pincode }}
                 </p>
@@ -112,7 +112,7 @@
         <!-- CART ITEMS -->
         {% for item in cart_items %}
             <div class="cart-item">
-                <img src="{{ item.product.image.url }}" alt="{{ item.product.name }}">
+                <img src="{{ item.product.image_url}}" alt="{{ item.product.name }}">
                 <div class="cart-item-details">
                     <h4>{{ item.product.name }}</h4>
                     <p>Size: {{ item.size|default:"N/A" }}</p>
@@ -155,6 +155,7 @@
         </div>
 
         <!-- ACTION BUTTON -->
+
         <form method="POST"
               action="{% if payment_method == 'cod' %}
                           {% url 'place_confirm_order' %}

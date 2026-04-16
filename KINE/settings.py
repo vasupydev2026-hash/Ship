@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'faqpage',
     'terms_co',
     'emailapp',
+    'shipping',
 
     
 ]
@@ -149,8 +150,8 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 import os
 
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD") # Google App password (16-char)
+EMAIL_HOST_USER = "agvasu2015@gmail.com"
+EMAIL_HOST_PASSWORD = "yvopbqyfzehqrirt" # Google App password (16-char)
 FAST2SMS_API_KEY = "Sv9MoCRq6tuT4Fla1erpJxWdIOE08LNhfbBQwnyYKiXzm5cUV2Fg7zHGLd0k4T6b5tADsjcOW1fYwBXh"
 
 
@@ -162,25 +163,22 @@ RAZORPAY_KEY_SECRET = "9WED8m2OuuAJv8VpKGrurJ5M"
 # LOGIN_URL = 'login'
 # LOGIN_REDIRECT_URL = 'profile'
 # LOGOUT_REDIRECT_URL = 'login'
-#
-# DEFAULT_AUTO_FIELD = 'django.
-#
-# db.models.BigAutoField'
 
-# # settings.py
-# DELHIVERY_API_TOKEN = "5dcd6d9356c7a9bf624f1b536094f23471a00a45"
-# DELHIVERY_BASE_URL = "https://track.delhivery.com"
-#
-# DELHIVERY_PICKUP_LOCATION = "PRIMARY"
-# # ⚠️ Must EXACTLY match Delhivery dashboard pickup name
-#
-# DELHIVERY_RETURN_ADDRESS_ID = ""  # optional for now
-# DELHIVERY_MODE = "test"
-#
+
+SHIPROCKET_EMAIL = "sreekanthgutha2001@gmail.com"
+SHIPROCKET_PASSWORD = "Sudha@2001"
+SHIPROCKET_BASE_URL = "https://apiv2.shiprocket.in/v1/external"
+
+# CELERY CONFIG
+
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
+CELERY_TIMEZONE = 'Asia/Kolkata'
+
 # settings.py
 
-SHIPROCKET_EMAIL = "agvasup123@gmail.com"
-SHIPROCKET_PASSWORD = "tRJW4X%e&AceGABy0%8gndOFE60bZpJl"
 
 # Redis cache (for token)
 CACHES = {

@@ -226,6 +226,11 @@
 
 <body>
 
+<script>
+    const TAX_PERCENTAGE = {{ taxes_and_charges.tax|floatformat:2 }};
+    const DELIVERY_CHARGE = {{ taxes_and_charges.delivery_charges|floatformat:2 }};
+    const FREE_DELIVERY_MIN = {{ taxes_and_charges.min_amount_for_free_delivery|floatformat:2 }};
+</script>
 
     <div class="main-cart-div {% if not cart_items %}empty-cart-layout{% endif %}">
             <!-- CART ITEMS SECTION -->
@@ -344,10 +349,10 @@
                 <input type="hidden" id="tax-rate" value="{{ taxes_and_charges.tax }}">
                 <input type="hidden" id="delivery-charge-base" value="{{ taxes_and_charges.delivery_charges }}">
 
-                <p><span class="label">Taxes:</span> <span class="value" id="taxes">₹{{ taxes|floatformat:2 }}</span></p>
-                <p><span class="label">Delivery Charges:</span> <span class="value" id="delivery-charge">₹{{ delivery_charge|floatformat:2 }}</span></p>
+                <p><span class="label">Taxes:</span><span id="tax-amount">₹{{ taxes|floatformat:2 }}</span></p>
+                <p><span class="label">Delivery Charges:</span> <span id="delivery-charge">₹{{ delivery_charge|floatformat:2 }}</span></p>
                 <hr>
-                <p class="grand-total"><span class="label">Grand Total:</span> <span class="value" id="grand-total">₹{{ grand_total|floatformat:2 }}</span></p>
+                <p class="grand-total"><span class="label">Grand Total:</span> <span id="grand-total">₹{{ grand_total|floatformat:2 }}</span></p>
 
                 <input type="hidden" id="min-amount-for-free-delivery" value="{{ min_amount_for_free_delivery|floatformat:2 }}">
 
@@ -408,30 +413,6 @@
             </div>
 
     </div>
-
-<!-- ✅ KEEP ONLY ADDRESS DROPDOWN JS -->
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-    const select = document.getElementById("selected_address");
-    if (!select) return;
-
-    const selected = select.querySelector(".selected-option");
-    const options = select.querySelector(".options");
-    const hiddenInput = document.getElementById("selected_address_input");
-
-    selected.addEventListener("click", () => {
-        options.style.display = options.style.display === "block" ? "none" : "block";
-    });
-
-    options.querySelectorAll(".option").forEach(opt => {
-        opt.addEventListener("click", () => {
-            selected.innerHTML = opt.innerHTML;
-            hiddenInput.value = opt.dataset.id;
-            options.style.display = "none";
-        });
-    });
-});
-</script>
 </body>
 </html>
 {% endblock %}

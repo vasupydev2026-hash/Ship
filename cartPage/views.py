@@ -104,6 +104,7 @@ def add_to_cart(request):
 
 # -------   CART VIEW OR CART ITEMS --------- #
 
+from decimal import Decimal
 
 def cart(request):
     """Render cart page for the current user."""
@@ -126,7 +127,8 @@ def cart(request):
     all_items_eligible_for_cod = True
 
     for item in cart_items:
-        item.subtotal = item.price * item.quantity
+        item_price = Decimal(str(item.price))  # ✅ FIX
+        item.subtotal = item_price * item.quantity
         total_items += item.quantity
 
         stock_record = ProductStock.objects.filter(
@@ -136,17 +138,25 @@ def cart(request):
 
         item.stock = stock_record.stock if stock_record else 0
 
-        # ✅ Always use the current product's COD status (not the stored cart item value)
         if item.product and not item.product.is_available_for_cod:
             all_items_eligible_for_cod = False
             item.is_available_for_cod = False
         else:
             item.is_available_for_cod = True
 
-    total_price = sum(item.price * item.quantity for item in cart_items)
-    delivery_charge = 0 if total_price >= min_amount_for_free_delivery else delivery_charges
-    taxes = (tax_percentage / Decimal(100)) * total_price
-    grand_total = total_price + taxes + delivery_charge
+    # ✅ FIXED TOTAL PRICE
+    total_price = sum(Decimal(str(item.price)) * item.quantity for item in cart_items)
+    total_price = Decimal(str(total_price)).quantize(Decimal("0.01"))
+    tax_percentage = Decimal(str(tax_percentage))
+    taxes = (tax_percentage / Decimal("100") * total_price).quantize(Decimal("0.01"))
+
+    delivery_charges = Decimal(str(delivery_charges))
+    min_amount_for_free_delivery = Decimal(str(min_amount_for_free_delivery))
+
+    delivery_charge = Decimal("0.00") if total_price >= min_amount_for_free_delivery else delivery_charges
+    delivery_charge = delivery_charge.quantize(Decimal("0.01"))
+
+    grand_total = (total_price + taxes + delivery_charge).quantize(Decimal("0.01"))
 
     # ----------------- DEFAULT ADDRESS -----------------
     default_address = None
