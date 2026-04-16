@@ -139,14 +139,13 @@ def confirm_order(request):
 
 
 from django.contrib.auth.decorators import login_required
-from orders.services.shipping_pipeline import process_shipping
+
 from django.db import transaction
 from django.shortcuts import redirect
 from django.contrib import messages
 from decimal import Decimal
 from .utils import generate_order_code, send_order_confirmation_email
-from .services.shipping_pipeline import process_shipping
-from .tasks import process_shiprocket_order
+
 from django.db import transaction
 @login_required
 @transaction.atomic
@@ -256,15 +255,13 @@ def place_confirm_order(request):
         # -----------------------------
         cart_items.delete()
 
-        # -----------------------------
-        # 🚚 SHIPPING PIPELINE (IMPORTANT FIX)
-        # -----------------------------
-        transaction.on_commit(lambda: process_shipping(order.id))
+
     # -----------------------------
     # EMAIL
     # -----------------------------
     send_order_confirmation_email(order)
 
+    process_shipping.delay(order.id)
     # -----------------------------
     # CLEAR SESSION
     # -----------------------------
@@ -313,7 +310,7 @@ from app.models import Product, Size, ProductStock
 
 client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
-from decimal import Decimal
+
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
@@ -407,75 +404,19 @@ def razorpay_payment(request):
 
 
 
-# ------------------- Payment Success Handler -------------------
 
-import requests
+
 from django.views.decorators.csrf import csrf_exempt
-from django.db import transaction
-from django.shortcuts import render, redirect
-from django.utils import timezone
-from decimal import Decimal
-import razorpay
-from .services.shiprocket import create_order as shiprocket_create_order
-
-from django.shortcuts import redirect, render
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.db import transaction
-from django.utils import timezone
-from decimal import Decimal
-
-
-from .utils import generate_order_code, send_order_confirmation_email
-from .services.shiprocket import create_order as shiprocket_create_order
-
-import razorpay
-
-
-client = razorpay.Client(auth=("YOUR_KEY", "YOUR_SECRET"))
-
-from django.shortcuts import redirect, render
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.db import transaction
-from django.utils import timezone
-from decimal import Decimal
 
 import razorpay
 from .utils import generate_order_code, send_order_confirmation_email
-from .services.shiprocket import create_order as shiprocket_create_order
 
 client = razorpay.Client(auth=("YOUR_KEY", "YOUR_SECRET"))
 
 
-# -------------------------------
-# 🚚 SHIPROCKET PUSH FUNCTION
-# -------------------------------
 
-def push_shiprocket_order(order_id):
-
-    try:
-        order = Order.objects.get(id=order_id)
-
-        print("🚚 Sending order to Shiprocket...")
-
-        ship_res = shiprocket_create_order(order)
-
-        print("🚚 Shiprocket Response:", ship_res)
-
-        # FIX: Shiprocket sometimes returns shipment_id or data.shipment_id
-        shipment_id = ship_res.get("shipment_id") or ship_res.get("data", {}).get("shipment_id")
-
-        if shipment_id:
-            order.shiprocket_shipment_id = shipment_id
-            order.save()
-
-        else:
-            print("⚠️ No shipment_id returned:", ship_res)
-
-    except Exception as e:
-        print("❌ Shiprocket Error:", str(e))
-
+from django.db import transaction
+from shipping.tasks import process_shipping
 @csrf_exempt
 @transaction.atomic
 def razorpay_payment_success(request):
@@ -602,31 +543,13 @@ def razorpay_payment_success(request):
             user=user
         ).delete()
 
-    # -------------------------------
-    # 🚚 SHIPROCKET (AFTER COMMIT - SAFE)
-    # -------------------------------
-    def after_commit_shiprocket():
-        try:
-            from .services.shiprocket import create_order as shiprocket_create_order
-
-            ship_res = shiprocket_create_order(order)
-
-            print("🚚 Shiprocket Response:", ship_res)
-
-            order.shiprocket_shipment_id = ship_res.get("shipment_id")
-            order.shiprocket_order_id = ship_res.get("order_id")
-            order.save()
-
-        except Exception as e:
-            print("❌ Shiprocket Error:", str(e))
-
-    transaction.on_commit(lambda: process_shipping(order.id))
 
     # -------------------------------
     # 📧 EMAIL
     # -------------------------------
     send_order_confirmation_email(order)
 
+    process_shipping.delay(order.id)
     # -------------------------------
     # 🧹 CLEAR SESSION
     # -------------------------------
@@ -642,64 +565,8 @@ def razorpay_payment_success(request):
     return redirect("order_success")
 
 
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 import json
 from .models import Order
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-import json
-from .models import Order
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
-from django.utils import timezone
-import json
-from .models import Order
-
-from django.conf import settings
-
-@csrf_exempt
-def shiprocket_webhook(request):
-
-    # 🔐 TOKEN VALIDATION
-    api_key = request.headers.get("x-api-key")
-
-    if api_key != settings.SHIPROCKET_WEBHOOK_TOKEN:
-        return JsonResponse({"error": "Unauthorized"}, status=401)
-
-    if request.method != "POST":
-        return JsonResponse({"error": "Invalid request"}, status=400)
-
-    try:
-        data = json.loads(request.body)
-        print("📩 WEBHOOK:", data)
-
-        awb = data.get("awb")
-        status = data.get("current_status")
-
-        order = Order.objects.filter(awb_code=awb).first()
-
-        if not order:
-            return JsonResponse({"status": "ignored"})
-
-        order.tracking_status = status
-
-        if status.lower() == "delivered":
-            order.status = "delivered"
-
-        elif status.lower() == "out for delivery":
-            order.status = "out_for_delivery"
-
-        elif status.lower() in ["shipped", "in transit"]:
-            order.status = "shipped"
-
-        order.save()
-
-        return JsonResponse({"status": "updated"})
-
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
 
 @login_required
 def retry_payment(request, order_id):
@@ -816,9 +683,6 @@ def active_item_partial(request, item_id):
         "item": item
     })
 
-# orders/views.py
-from django.http import JsonResponse
-from django.db import transaction
 
 @login_required
 def cancel_order_item(request, item_id):
@@ -1052,6 +916,3 @@ def track_order_item(request, item_id):
         'item': item
     })
 
-
-
-# --------- ship rocket  -----------#

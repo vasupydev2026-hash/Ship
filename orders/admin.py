@@ -1,6 +1,10 @@
 from django.contrib import admin
-from django.utils import timezone
+from django.utils.html import format_html
+from django.db import transaction
+
 from .models import Order, OrderItem, ReturnRequest
+from shipping.tasks import process_shipping
+from shipping.models import Shipment
 
 
 # =========================
@@ -10,186 +14,160 @@ class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 0
     readonly_fields = (
-        "product",
-        "product_name",
-        "size",
-        "quantity",
-        "price",
-        "status",
+        'product',
+        'product_name',
+        'product_sku',
+        'size',
+        'quantity',
+        'price',
+        'status',
     )
     can_delete = False
 
 
 # =========================
-# ORDER ADMIN
+# RETURN REQUEST INLINE
+# =========================
+class ReturnRequestInline(admin.TabularInline):
+    model = ReturnRequest
+    extra = 0
+    readonly_fields = (
+        'item',
+        'reason',
+        'quantity',
+        'refund_amount',
+        'status',
+        'created_at',
+    )
+    can_delete = False
+
+
+# =========================
+# ORDER ADMIN (UPGRADED)
 # =========================
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
 
     list_display = (
-        "order_code",
-        "user",
-        "payment_method",
-        "payment_status",
-        "status",
-        "grand_total",
-        "shiprocket_order_id",
-        "shiprocket_shipment_id",
-        "awb_code",
-        "created_at",
+        'order_code',
+        'user',
+        'order_status_badge',
+        'payment_status',
+        'grand_total',
+        'shipment_status',
+        'tracking_link',
+        'created_at',
     )
 
     list_filter = (
-        "payment_status",
-        "payment_method",
-        "status",
-        "created_at",
+        'status',
+        'payment_status',
+        'payment_method',
+        'created_at',
     )
 
     search_fields = (
-        "order_code",
-        "user__username",
-        "user__email",
-        "razorpay_order_id",
-        "razorpay_payment_id",
-        "shiprocket_order_id",
-        "shiprocket_shipment_id",
+        'order_code',
+        'user__username',
+        'user__email',
     )
 
     readonly_fields = (
-        "order_code",
-        "user",
-        "address",
-
-        # amounts
-        "total_amount",
-        "tax_amount",
-        "delivery_charges",
-        "grand_total",
-
-        # payment
-        "payment_method",
-        "payment_status",
-        "razorpay_order_id",
-        "razorpay_payment_id",
-
-        # shipping (SHIPROCKET)
-        "shiprocket_order_id",
-        "shiprocket_shipment_id",
-        "awb_code",
-
-        # status
-        "status",
-        "created_at",
-        "updated_at",
-        "paid_at",
+        'order_code',
+        'total_amount',
+        'tax_amount',
+        'delivery_charges',
+        'grand_total',
+        'created_at',
+        'updated_at',
+        'razorpay_order_id',
+        'razorpay_payment_id',
+        'paid_at',
     )
 
-    inlines = [OrderItemInline]
+    inlines = [OrderItemInline, ReturnRequestInline]
 
-    fieldsets = (
-        ("Order Info", {
-            "fields": ("order_code", "user", "address", "created_at")
-        }),
+    ordering = ('-created_at',)
 
-        ("Amount Details", {
-            "fields": ("total_amount", "tax_amount", "delivery_charges", "grand_total")
-        }),
+    # =========================
+    # 🎯 UI STATUS BADGE
+    # =========================
+    def order_status_badge(self, obj):
+        colors = {
+            "pending": "gray",
+            "confirmed": "blue",
+            "shipped": "orange",
+            "delivered": "green",
+            "cancelled": "red",
+        }
+        color = colors.get(obj.status.lower(), "black")
 
-        ("Payment Details", {
-            "fields": ("payment_method", "payment_status", "razorpay_order_id", "razorpay_payment_id")
-        }),
+        return format_html(
+            '<span style="color:white;padding:4px 8px;border-radius:5px;background:{};">{}</span>',
+            color,
+            obj.status.upper()
+        )
 
-        ("Shipping Details (Shiprocket)", {
-            "fields": ("shiprocket_order_id", "shiprocket_shipment_id", "awb_code")
-        }),
+    order_status_badge.short_description = "Order Status"
 
-        ("Status", {
-            "fields": ("status",)
-        }),
-    )
+    # =========================
+    # 📦 SHIPMENT STATUS
+    # =========================
+    def shipment_status(self, obj):
+        shipment = Shipment.objects.filter(order=obj).first()
+        return shipment.status if shipment else "Not Created"
 
-    def order_status_display(self, obj):
-        return obj.get_status_display()
+    shipment_status.short_description = "Shipment"
 
-    order_status_display.short_description = "Order Status"
+    # =========================
+    # 🔗 TRACKING LINK
+    # =========================
+    def tracking_link(self, obj):
+        shipment = Shipment.objects.filter(order=obj).first()
+        if shipment and shipment.tracking_url:
+            return format_html(
+                '<a href="{}" target="_blank" style="color:white;background:#28a745;padding:5px 10px;border-radius:5px;">Track</a>',
+                shipment.tracking_url
+            )
+        return "-"
 
+    tracking_link.short_description = "Tracking"
 
-# =========================
-# RETURN ADMIN
-# =========================
-@admin.register(ReturnRequest)
-class ReturnRequestAdmin(admin.ModelAdmin):
+    # =========================
+    # 🔥 ADMIN ACTIONS
+    # =========================
+    actions = [
+        'create_shipping',
+        'retry_shipping',
+        'mark_as_shipped',
+        'mark_as_delivered',
+    ]
 
-    list_display = (
-        "order",
-        "item",
-        "status",
-        "quantity",
-        "refund_amount",
-        "return_waybill",
-        "created_at",
-        "refunded_at",
-    )
+    # 🚚 Create shipment manually
+    def create_shipping(self, request, queryset):
+        for order in queryset:
+            print("ADMIN HIT:", order.id)  # DEBUG
+            process_shipping.delay(order.id)
 
-    list_filter = (
-        "status",
-        "courier_name",
-    )
+        self.message_user(request, "🚚 Shipping process started!")
 
-    search_fields = (
-        "order__order_code",
-        "item__product__name",
-        "return_waybill",
-    )
+    # 🔁 Retry shipping
+    def retry_shipping(self, request, queryset):
+        for order in queryset:
+            process_shipping.delay(order.id)
 
-    readonly_fields = (
-        "order",
-        "item",
-        "reason",
-        "quantity",
-        "courier_name",
-        "return_waybill",
-        "refund_amount",
-        "status",
-        "created_at",
-        "approved_at",
-        "pickup_scheduled_at",
-        "picked_up_at",
-        "received_at",
-        "refunded_at",
-    )
+        self.message_user(request, "🔁 Shipping retry triggered!")
 
-    actions = ["approve_return"]
+    retry_shipping.short_description = "🔁 Retry Shipping"
 
-    def approve_return(self, request, queryset):
+    # 📦 Mark shipped
+    def mark_as_shipped(self, request, queryset):
+        queryset.update(status='shipped')
 
-        from orders.delhivery import create_return_shipment
+    mark_as_shipped.short_description = "📦 Mark as Shipped"
 
-        for ret in queryset:
+    # ✅ Mark delivered
+    def mark_as_delivered(self, request, queryset):
+        queryset.update(status='delivered')
 
-            if ret.status == "requested":
-
-                ret.status = "approved"
-                ret.approved_at = timezone.now()
-                ret.save()
-
-                try:
-                    create_return_shipment(ret)
-                except Exception as e:
-                    self.message_user(
-                        request,
-                        f"Pickup error: {e}",
-                        level="error"
-                    )
-
-                ret.refund_amount = ret.item.price * ret.quantity
-                ret.status = "refunded"
-                ret.refunded_at = timezone.now()
-                ret.save()
-
-                ret.order.recalculate_totals()
-
-        self.message_user(request, "Return processed successfully.")
-
-    approve_return.short_description = "Approve & Refund Return"
+    mark_as_delivered.short_description = "✅ Mark as Delivered"

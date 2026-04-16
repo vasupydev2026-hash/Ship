@@ -56,12 +56,7 @@ class Order(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='processing')
 
     # ================= SHIPROCKET =================
-    shiprocket_order_id = models.CharField(max_length=100, null=True, blank=True)
-    shiprocket_shipment_id = models.CharField(max_length=100, null=True, blank=True)
-    shiprocket_status = models.CharField(max_length=50, default="not_created")
-    awb_code = models.CharField(max_length=100, null=True, blank=True)
-    tracking_status = models.CharField(max_length=100, default="created")
-    tracking_last_update = models.DateTimeField(null=True, blank=True)
+
     # ================= TIMESTAMPS =================
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

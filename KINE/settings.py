@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'faqpage',
     'terms_co',
     'emailapp',
+    'shipping',
 
     
 ]
@@ -164,9 +165,20 @@ RAZORPAY_KEY_SECRET = "9WED8m2OuuAJv8VpKGrurJ5M"
 # LOGOUT_REDIRECT_URL = 'login'
 
 
-SHIPROCKET_EMAIL = "agvasup123@gmail.com"
-SHIPROCKET_PASSWORD = "@2001@Vasu@"
+SHIPROCKET_EMAIL = "sreekanthgutha2001@gmail.com"
+SHIPROCKET_PASSWORD = "Sudha@2001"
 SHIPROCKET_BASE_URL = "https://apiv2.shiprocket.in/v1/external"
+
+# CELERY CONFIG
+
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
+CELERY_TIMEZONE = 'Asia/Kolkata'
+
+# settings.py
+
 
 # Redis cache (for token)
 CACHES = {
