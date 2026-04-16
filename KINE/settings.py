@@ -162,25 +162,11 @@ RAZORPAY_KEY_SECRET = "9WED8m2OuuAJv8VpKGrurJ5M"
 # LOGIN_URL = 'login'
 # LOGIN_REDIRECT_URL = 'profile'
 # LOGOUT_REDIRECT_URL = 'login'
-#
-# DEFAULT_AUTO_FIELD = 'django.
-#
-# db.models.BigAutoField'
 
-# # settings.py
-# DELHIVERY_API_TOKEN = "5dcd6d9356c7a9bf624f1b536094f23471a00a45"
-# DELHIVERY_BASE_URL = "https://track.delhivery.com"
-#
-# DELHIVERY_PICKUP_LOCATION = "PRIMARY"
-# # ⚠️ Must EXACTLY match Delhivery dashboard pickup name
-#
-# DELHIVERY_RETURN_ADDRESS_ID = ""  # optional for now
-# DELHIVERY_MODE = "test"
-#
-# settings.py
 
 SHIPROCKET_EMAIL = "agvasup123@gmail.com"
-SHIPROCKET_PASSWORD = "tRJW4X%e&AceGABy0%8gndOFE60bZpJl"
+SHIPROCKET_PASSWORD = "@2001@Vasu@"
+SHIPROCKET_BASE_URL = "https://apiv2.shiprocket.in/v1/external"
 
 # Redis cache (for token)
 CACHES = {

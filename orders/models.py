@@ -9,19 +9,19 @@ from cartPage.models import TaxesAndCharges
 # =========================
 # ORDER
 # =========================
-
 class Order(models.Model):
-    order_code = models.CharField(max_length=12, unique=True, editable=False)
+    order_code = models.CharField(max_length=20, unique=True, editable=False)
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, blank=True)
 
-    # ---------- Amounts ----------
+    # ================= AMOUNTS =================
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     delivery_charges = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     grand_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
-    # ---------- Payment ----------
+    # ================= PAYMENT =================
     PAYMENT_STATUS = (
         ('pending', 'Pending'),
         ('paid', 'Paid'),
@@ -29,19 +29,20 @@ class Order(models.Model):
         ('refunded', 'Refunded'),
     )
 
-    payment_method = models.CharField(max_length=50, default="razorpay")
-    razorpay_order_id = models.CharField(max_length=200, null=True, blank=True)
-    razorpay_payment_id = models.CharField(max_length=200, null=True, blank=True)
-    payment_status = models.CharField(
-        max_length=20,
-        choices=PAYMENT_STATUS,
-        default='pending'
+    PAYMENT_METHOD = (
+        ('razorpay', 'Razorpay'),
+        ('cod', 'COD'),
     )
 
-    payment_failure_reason = models.TextField(null=True, blank=True)
-    payment_attempts = models.PositiveIntegerField(default=1)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD, default='razorpay')
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='pending')
 
-    # ---------- Order Status ----------
+    razorpay_order_id = models.CharField(max_length=200, null=True, blank=True)
+    razorpay_payment_id = models.CharField(max_length=200, null=True, blank=True)
+
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    # ================= ORDER STATUS =================
     STATUS_CHOICES = (
         ('confirmed', 'Confirmed'),
         ('processing', 'Processing'),
@@ -54,23 +55,19 @@ class Order(models.Model):
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='processing')
 
-    # ---------- Timestamps ----------
+    # ================= SHIPROCKET =================
+    shiprocket_order_id = models.CharField(max_length=100, null=True, blank=True)
+    shiprocket_shipment_id = models.CharField(max_length=100, null=True, blank=True)
+    shiprocket_status = models.CharField(max_length=50, default="not_created")
+    awb_code = models.CharField(max_length=100, null=True, blank=True)
+    tracking_status = models.CharField(max_length=100, default="created")
+    tracking_last_update = models.DateTimeField(null=True, blank=True)
+    # ================= TIMESTAMPS =================
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    paid_at = models.DateTimeField(null=True, blank=True)
 
-    # ---------- Shipping (Delhivery) ----------
-
-    courier_name = models.CharField(max_length=50, blank=True, null=True)
-    tracking_id = models.CharField(max_length=100, blank=True, null=True)  # Waybill
-    shipment_created_at = models.DateTimeField(null=True, blank=True)
-    shipped_at = models.DateTimeField(null=True, blank=True)
-    delivered_at = models.DateTimeField(null=True, blank=True)
-
-    shipping_status = models.CharField(
-        max_length=50,
-        default="not_created"
-    )
+    def __str__(self):
+        return self.order_code
 
 ### order status  ###
 
@@ -152,43 +149,32 @@ class Order(models.Model):
 # ORDER ITEM
 # =========================
 class OrderItem(models.Model):
-
     STATUS_CHOICES = (
         ('confirmed', 'Confirmed'),
         ('processing', 'Processing'),
         ('shipped', 'Shipped'),
-        ('out_for_delivery', 'Out For Delivery'),
         ('delivered', 'Delivered'),
         ('cancelled', 'Cancelled'),
         ('returned', 'Returned'),
     )
 
-    order = models.ForeignKey(
-        Order,
-        related_name="items",
-        on_delete=models.CASCADE
-    )
+    order = models.ForeignKey(Order, related_name="items", on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True)
-    product_name = models.CharField(product.name,default='Name')
-    # product_name = models.CharField(max_length=255)
 
+    product_name = models.CharField(max_length=255)  # ✅ FIXED
     product_sku = models.CharField(max_length=100, blank=True)
+
     size = models.ForeignKey(Size, null=True, blank=True, on_delete=models.SET_NULL)
     quantity = models.PositiveIntegerField(default=1)
-    refunded_quantity = models.PositiveIntegerField(default=0)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='confirmed')
-    return_reason = models.TextField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        # Recalculate order totals automatically whenever item changes
-        if self.order:
-            self.order.recalculate_totals()
-            self.order.update_status_from_items()  # 🔑 ADD THIS
+        if self.product and not self.product_name:
+            self.product_name = self.product.name
 
-    def __str__(self):
-        return f"{self.product_name} x {self.quantity}"
+        super().save(*args, **kwargs)
 
 # =========================
 # RETURN REQUEST

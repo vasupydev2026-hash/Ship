@@ -139,21 +139,26 @@ def confirm_order(request):
 
 
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect
+from orders.services.shipping_pipeline import process_shipping
 from django.db import transaction
-from decimal import Decimal
+from django.shortcuts import redirect
 from django.contrib import messages
-from orders.utils import generate_order_code
+from decimal import Decimal
+from .utils import generate_order_code, send_order_confirmation_email
+from .services.shipping_pipeline import process_shipping
+from .tasks import process_shiprocket_order
+from django.db import transaction
 @login_required
 @transaction.atomic
 def place_confirm_order(request):
+
     if request.method != "POST":
         return redirect("cart")
 
     user = request.user
 
     # -----------------------------
-    # DATA FROM SESSION
+    # SESSION DATA
     # -----------------------------
     selected_items = request.session.get("selected_items", [])
     selected_address_id = request.session.get("selected_address")
@@ -164,19 +169,21 @@ def place_confirm_order(request):
         return redirect("cart")
 
     # -----------------------------
-    # FETCH ADDRESS
+    # ADDRESS
     # -----------------------------
     address = Address.objects.filter(user=user, id=selected_address_id).first()
+
     if not address:
         messages.error(request, "Delivery address not found.")
         return redirect("cart")
 
     # -----------------------------
-    # FETCH CART ITEMS
+    # CART ITEMS
     # -----------------------------
-    cart_items = CartItem.objects.select_related(
-        "product", "size"
-    ).filter(user=user, id__in=selected_items)
+    cart_items = CartItem.objects.select_related("product", "size").filter(
+        user=user,
+        id__in=selected_items
+    )
 
     if not cart_items.exists():
         messages.error(request, "Cart items not found.")
@@ -186,11 +193,13 @@ def place_confirm_order(request):
     # PRICE CALCULATION
     # -----------------------------
     tax_obj = TaxesAndCharges.objects.last()
+
     tax_rate = Decimal(tax_obj.tax) if tax_obj else Decimal("0.00")
     delivery_charge = Decimal(tax_obj.delivery_charges) if tax_obj else Decimal("0.00")
     min_free_delivery = Decimal(tax_obj.min_amount_for_free_delivery) if tax_obj else Decimal("0.00")
 
-    subtotal = sum(item.price * item.quantity for item in cart_items)
+    subtotal = sum(Decimal(str(item.price)) * item.quantity for item in cart_items)
+
     taxes = (subtotal * tax_rate / Decimal("100")).quantize(Decimal("0.01"))
 
     if subtotal >= min_free_delivery:
@@ -201,80 +210,68 @@ def place_confirm_order(request):
     print("🔥 COD ORDER DATA:", total_amount, taxes, delivery_charge)
 
     # -----------------------------
-    # CREATE ORDER
+    # TRANSACTION START
     # -----------------------------
+    with transaction.atomic():
 
-    order = Order.objects.create(
-        user=user,
-        address=address,
-        payment_method="COD",
-        payment_status="pending",  # 🔑 REQUIRED
-        status="confirmed",  # 🔑 REQUIRED
-        total_amount=total_amount,
-        tax_amount=taxes,
-        delivery_charges=delivery_charge,
-        order_code=generate_order_code(),  # ✅ ORDER CODE HERE
-
-    )
-
-    # -----------------------------
-    # CREATE ORDER ITEMS + STOCK REDUCE
-    # -----------------------------
-    for item in cart_items:
-        stock = ProductStock.objects.select_for_update().filter(
-            product=item.product,
-            size=item.size
-        ).first()
-
-        if not stock or stock.stock < item.quantity:
-            messages.error(request, f"Insufficient stock for {item.product.name}")
-            raise Exception("Stock issue")
-
-        stock.stock -= item.quantity
-        stock.save()
-
-        OrderItem.objects.create(
-            order=order,
-            product=item.product,
-            quantity=item.quantity,
-            price=item.price,
-            size=item.size,
-
+        # -----------------------------
+        # CREATE ORDER
+        # -----------------------------
+        order = Order.objects.create(
+            user=user,
+            address=address,
+            order_code=generate_order_code(),
+            payment_method="cod",
+            payment_status="pending",
+            status="confirmed",
+            total_amount=total_amount,
+            tax_amount=taxes,
+            delivery_charges=delivery_charge,
+            grand_total=total_amount,
         )
 
+        # -----------------------------
+        # ORDER ITEMS + STOCK UPDATE
+        # -----------------------------
+        for item in cart_items:
+            stock = ProductStock.objects.select_for_update().get(
+                product=item.product,
+                size=item.size
+            )
+
+            stock.stock -= item.quantity
+            stock.save()
+
+            OrderItem.objects.create(
+                order=order,
+                product=item.product,
+                product_name=item.product.name,
+                quantity=item.quantity,
+                price=item.price,
+                size=item.size,
+            )
+
+        # -----------------------------
+        # CLEAR CART
+        # -----------------------------
+        cart_items.delete()
+
+        # -----------------------------
+        # 🚚 SHIPPING PIPELINE (IMPORTANT FIX)
+        # -----------------------------
+        transaction.on_commit(lambda: process_shipping(order.id))
     # -----------------------------
-    # CLEAR CART
+    # EMAIL
     # -----------------------------
-    cart_items.delete()
+    send_order_confirmation_email(order)
 
     # -----------------------------
-    # # DELHIVERY SHIPPING (COD)
-    # # -----------------------------
-    # from orders.delhivery import ship_order
-    #
-    # try:
-    #     ship_order(order)
-    # except Exception as e:
-    #     print("Delhivery shipping error:", str(e))
-    #
-    
-    # -------------------------------
-    # 📧 CONFIRMATION EMAIL
-    # -------------------------------
-    send_order_confirmation_email(order)  
-    
-    # -----------------------------
-    # CLEAR ONLY CHECKOUT SESSION DATA
+    # CLEAR SESSION
     # -----------------------------
     for key in ["selected_items", "selected_address", "payment_method"]:
         request.session.pop(key, None)
-     
-    # -----------------------------
-    # SUCCESS
-    # -----------------------------
+
     return redirect("order_success")
-
-
 
 @login_required
 def payment_success(request):
@@ -402,7 +399,6 @@ def razorpay_payment(request):
         "tax_amount": tax_amount,
         "delivery_charge": delivery_charge,
         "grand_total": grand_total,
-
         "razorpay_order_id": razorpay_order["id"],
         "razorpay_key_id": settings.RAZORPAY_KEY_ID,
         "amount_paise": amount_paise,
@@ -420,10 +416,70 @@ from django.shortcuts import render, redirect
 from django.utils import timezone
 from decimal import Decimal
 import razorpay
+from .services.shiprocket import create_order as shiprocket_create_order
+
+from django.shortcuts import redirect, render
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.db import transaction
+from django.utils import timezone
+from decimal import Decimal
+
+
+from .utils import generate_order_code, send_order_confirmation_email
+from .services.shiprocket import create_order as shiprocket_create_order
+
+import razorpay
+
+
+client = razorpay.Client(auth=("YOUR_KEY", "YOUR_SECRET"))
+
+from django.shortcuts import redirect, render
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.db import transaction
+from django.utils import timezone
+from decimal import Decimal
+
+import razorpay
+from .utils import generate_order_code, send_order_confirmation_email
+from .services.shiprocket import create_order as shiprocket_create_order
+
+client = razorpay.Client(auth=("YOUR_KEY", "YOUR_SECRET"))
+
+
+# -------------------------------
+# 🚚 SHIPROCKET PUSH FUNCTION
+# -------------------------------
+
+def push_shiprocket_order(order_id):
+
+    try:
+        order = Order.objects.get(id=order_id)
+
+        print("🚚 Sending order to Shiprocket...")
+
+        ship_res = shiprocket_create_order(order)
+
+        print("🚚 Shiprocket Response:", ship_res)
+
+        # FIX: Shiprocket sometimes returns shipment_id or data.shipment_id
+        shipment_id = ship_res.get("shipment_id") or ship_res.get("data", {}).get("shipment_id")
+
+        if shipment_id:
+            order.shiprocket_shipment_id = shipment_id
+            order.save()
+
+        else:
+            print("⚠️ No shipment_id returned:", ship_res)
+
+    except Exception as e:
+        print("❌ Shiprocket Error:", str(e))
 
 @csrf_exempt
 @transaction.atomic
 def razorpay_payment_success(request):
+
     if request.method != "POST":
         return redirect("cartPage:cartPage")
 
@@ -434,7 +490,7 @@ def razorpay_payment_success(request):
     razorpay_signature = request.POST.get("razorpay_signature")
 
     # -------------------------------
-    # 🔴 PAYMENT FAILED / CANCELLED
+    # ❌ PAYMENT FAILED
     # -------------------------------
     if not razorpay_payment_id:
         return render(request, "orders/payment_failed.html", {
@@ -442,7 +498,7 @@ def razorpay_payment_success(request):
         })
 
     # -------------------------------
-    # 🟢 VERIFY SIGNATURE
+    # 🔐 VERIFY PAYMENT
     # -------------------------------
     try:
         client.utility.verify_payment_signature({
@@ -456,7 +512,7 @@ def razorpay_payment_success(request):
         })
 
     # -------------------------------
-    # 🔐 FETCH DATA FROM SESSION
+    # 🛒 SESSION DATA
     # -------------------------------
     selected_items = request.session.get("selected_items", [])
     selected_address_id = request.session.get("selected_address")
@@ -464,9 +520,10 @@ def razorpay_payment_success(request):
     if not selected_items or not selected_address_id:
         return redirect("cartPage:cartPage")
 
-    cart_items = CartItem.objects.select_related(
-        "product", "size"
-    ).filter(user=user, id__in=selected_items)
+    cart_items = CartItem.objects.select_related("product", "size").filter(
+        user=user,
+        id__in=selected_items
+    )
 
     if not cart_items.exists():
         return redirect("cartPage:cartPage")
@@ -477,97 +534,101 @@ def razorpay_payment_success(request):
     # 💰 PRICE CALCULATION
     # -------------------------------
     tax_obj = TaxesAndCharges.objects.last()
+
     tax_rate = Decimal(tax_obj.tax) if tax_obj else Decimal("0.00")
     delivery_charge = Decimal(tax_obj.delivery_charges) if tax_obj else Decimal("0.00")
     free_delivery_min = Decimal(tax_obj.min_amount_for_free_delivery) if tax_obj else Decimal("0.00")
 
-    subtotal = sum(Decimal(str(item.price)) * item.quantity for item in cart_items)
+    subtotal = sum(Decimal(str(i.price)) * i.quantity for i in cart_items)
+
     tax_amount = (subtotal * tax_rate / Decimal("100")).quantize(Decimal("0.01"))
+
     if subtotal >= free_delivery_min:
         delivery_charge = Decimal("0.00")
 
     total_amount = (subtotal + tax_amount + delivery_charge).quantize(Decimal("0.01"))
 
-    print("🔥 RAZORPAY ORDER DATA:", total_amount, tax_amount, delivery_charge)
     # -------------------------------
-    # 🧾 CREATE ORDER (ONLY HERE ✅)
+    # 🧾 CREATE ORDER + ITEMS
     # -------------------------------
-    order = Order.objects.create(
-        user=user,
-        address=address,
-        order_code=generate_order_code(),
-        payment_method="razorpay",
-        payment_status="paid",
-        status="processing",
-        total_amount=total_amount,
-        tax_amount=tax_amount,
-        delivery_charges=delivery_charge,
-        razorpay_payment_id=razorpay_payment_id,
-        razorpay_order_id=razorpay_order_id,
-        paid_at=timezone.now(),
-    )
+    with transaction.atomic():
 
-    # -------------------------------
-    # 📦 ORDER ITEMS + STOCK LOCK
-    # -------------------------------
-
-    for item in cart_items:
-        stock = ProductStock.objects.select_for_update().get(
-            product=item.product,
-            size=item.size
+        order = Order.objects.create(
+            user=user,
+            address=address,
+            order_code=generate_order_code(),
+            payment_method="razorpay",
+            payment_status="paid",
+            status="processing",
+            total_amount=total_amount,
+            tax_amount=tax_amount,
+            delivery_charges=delivery_charge,
+            grand_total=total_amount,
+            razorpay_payment_id=razorpay_payment_id,
+            razorpay_order_id=razorpay_order_id,
+            paid_at=timezone.now(),
         )
 
-        if stock.stock < item.quantity:
-            raise Exception("Stock mismatch after payment")
+        # -------------------------------
+        # 📦 ORDER ITEMS + STOCK UPDATE
+        # -------------------------------
+        for item in cart_items:
 
-        stock.stock -= item.quantity
-        stock.save()
+            stock = ProductStock.objects.select_for_update().get(
+                product=item.product,
+                size=item.size
+            )
 
-        OrderItem.objects.create(
-            order=order,
-            product=item.product,
-            size=item.size,
-            quantity=item.quantity,
-            price=item.price
-        )
+            if stock.stock < item.quantity:
+                raise Exception("Stock mismatch after payment")
 
-    # -------------------------------
-    # 🧹 CLEAR CART
-    # -------------------------------
-    cart_items.delete()
+            stock.stock -= item.quantity
+            stock.save()
 
-    # -------------------------------
-    # 🚚 CREATE SHIPMENT (AFTER PAID)
-    # -------------------------------
-    # from orders.delhivery import ship_order
-    # ship_order(order)
+            OrderItem.objects.create(
+                order=order,
+                product=item.product,
+                product_name=item.product.name,
+                size=item.size,
+                quantity=item.quantity,
+                price=item.price
+            )
 
-    shiprocket_response = create_shiprocket_order(order)
-
-    # if shiprocket_response.get("status_code") == 1:
-    #     shipment_id = shiprocket_response.get("shipment_id")
-    #
-    #     awb_response = assign_courier_awb(shipment_id)
-    #
-    #     if awb_response.get("awb_code"):
-    #         order.tracking_id = awb_response["awb_code"]
-    #         order.courier_name = awb_response.get("courier_name")
-    #         order.shipping_status = "shipped"
-    #         order.save()
-    #
-    #         print("✅ AWB GENERATED:", order.tracking_id)
-
-    # print(shiprocket_response)
-    #
-    # return JsonResponse({"message": "Order placed successfully"})
+        # -------------------------------
+        # 🧹 CLEAR CART
+        # -------------------------------
+        CartItem.objects.filter(
+            id__in=selected_items,
+            user=user
+        ).delete()
 
     # -------------------------------
-    # 📧 CONFIRMATION EMAIL
+    # 🚚 SHIPROCKET (AFTER COMMIT - SAFE)
+    # -------------------------------
+    def after_commit_shiprocket():
+        try:
+            from .services.shiprocket import create_order as shiprocket_create_order
+
+            ship_res = shiprocket_create_order(order)
+
+            print("🚚 Shiprocket Response:", ship_res)
+
+            order.shiprocket_shipment_id = ship_res.get("shipment_id")
+            order.shiprocket_order_id = ship_res.get("order_id")
+            order.save()
+
+        except Exception as e:
+            print("❌ Shiprocket Error:", str(e))
+
+    transaction.on_commit(lambda: process_shipping(order.id))
+
+    # -------------------------------
+    # 📧 EMAIL
     # -------------------------------
     send_order_confirmation_email(order)
 
     # -------------------------------
-    # 🧹 CLEAR CHECKOUT SESSION
+    # 🧹 CLEAR SESSION
     # -------------------------------
     for key in [
         "selected_items",
@@ -578,14 +639,67 @@ def razorpay_payment_success(request):
     ]:
         request.session.pop(key, None)
 
-
-# -------------------------------
-# ✅ SUCCESS
-# -------------------------------
-
     return redirect("order_success")
 
-    
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
+from .models import Order
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
+from .models import Order
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.utils import timezone
+import json
+from .models import Order
+
+from django.conf import settings
+
+@csrf_exempt
+def shiprocket_webhook(request):
+
+    # 🔐 TOKEN VALIDATION
+    api_key = request.headers.get("x-api-key")
+
+    if api_key != settings.SHIPROCKET_WEBHOOK_TOKEN:
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+        print("📩 WEBHOOK:", data)
+
+        awb = data.get("awb")
+        status = data.get("current_status")
+
+        order = Order.objects.filter(awb_code=awb).first()
+
+        if not order:
+            return JsonResponse({"status": "ignored"})
+
+        order.tracking_status = status
+
+        if status.lower() == "delivered":
+            order.status = "delivered"
+
+        elif status.lower() == "out for delivery":
+            order.status = "out_for_delivery"
+
+        elif status.lower() in ["shipped", "in transit"]:
+            order.status = "shipped"
+
+        order.save()
+
+        return JsonResponse({"status": "updated"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
 
 @login_required
 def retry_payment(request, order_id):
@@ -819,61 +933,7 @@ def item_issue(request, item_id):
         "success": True,
         "message": "Return requested successfully"
     })
-
-from orders.delhivery import schedule_delhivery_pickup  # use the new name
-
-@login_required
-@transaction.atomic
-def approve_return(request, return_id):
-    rr = get_object_or_404(ReturnRequest, id=return_id)
-
-    if rr.status != "requested":
-        return JsonResponse({"error": "Invalid state"}, status=400)
-
-    rr.status = "approved"
-    rr.approved_at = timezone.now()
-    rr.save()
-
-    # 🔗 Call Delhivery helper (not view)
-    waybill = schedule_delhivery_pickup(rr)
-
-    return JsonResponse({"success": True, "waybill": waybill})
-
-from orders.forms import ReturnPickupForm
-@login_required
-def create_return_pickup(request, return_request_id):
-    """
-    User-facing view to manually schedule pickup.
-    """
-    return_request = get_object_or_404(ReturnRequest, id=return_request_id, user=request.user)
-
-    if return_request.status != 'approved':
-        return render(request, 'returns/error.html', {
-            'message': 'Pickup can only be scheduled for approved requests.'
-        })
-
-    if request.method == 'POST':
-        form = ReturnPickupForm(request.POST, instance=return_request)
-        if form.is_valid():
-            form.save()
-            return redirect('return_request_detail', return_request_id=return_request.id)
-    else:
-        form = ReturnPickupForm(instance=return_request)
-
-    return render(request, 'returns/create_pickup.html', {
-        'form': form,
-        'return_request': return_request
-    })
-
-@login_required
-def mark_return_received(request, return_id):
-    rr = get_object_or_404(ReturnRequest, id=return_id)
-
-    rr.status = "received"
-    rr.received_at = timezone.now()
-    rr.save()
-
-    return JsonResponse({"success": True})
+#
 
 import razorpay
 from django.conf import settings
@@ -994,145 +1054,4 @@ def track_order_item(request, item_id):
 
 
 
-# from django.contrib.admin.views.decorators import staff_member_required
-# from django.shortcuts import get_object_or_404, redirect
-# from django.contrib import messages
-# from orders.models import Order
-# from orders.delhivery import ship_order
-#
-# @staff_member_required
-# def ship_order_view(request, order_id):
-#     order = get_object_or_404(Order, id=order_id)
-#
-#     try:
-#         ship_order(order)
-#         messages.success(
-#             request,
-#             f"Order {order.order_code} shipped successfully via Delhivery."
-#         )
-#     except Exception as e:
-#         messages.error(request, str(e))
-#
-#     return redirect("admin:orders_order_change", order.id)
-#
-
-
-
-
-##### ship rocket
-
-import requests
-
-def get_shiprocket_token():
-    import requests
-
-    url = "https://apiv2.shiprocket.in/v1/external/auth/login"
-
-    payload = {
-        "email": "agvasup123@gmail.com",
-        "password": "tRJW4X%e&AceGABy0%8gndOFE60bZpJl"
-    }
-
-    response = requests.post(url, json=payload)
-    data = response.json()
-
-    print("Shiprocket Login Response:", data)  # DEBUG
-
-    if 'token' in data:
-        return data['token']
-    else:
-        raise Exception(f"Shiprocket Auth Failed: {data}")
-
-def create_shiprocket_order(order):
-    token = get_shiprocket_token()
-
-    url = "https://apiv2.shiprocket.in/v1/external/orders/create/adhoc"
-
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-
-    address = order.address
-    user = order.user
-    payload = {
-        "order_id": str(order.order_code),
-        "order_date": order.created_at.strftime("%Y-%m-%d %H:%M"),
-
-        # ✅ ADD THIS LINE (CRITICAL FIX)
-        "channel_id": "",
-
-        "pickup_location": "Primary",
-
-        "billing_customer_name": address.fullname,
-        "billing_last_name": "",
-        "billing_address": address.address1,
-        "billing_address_2": address.address2 or "",
-        "billing_city": address.city,
-        "billing_pincode": address.pincode,
-        "billing_state": address.state,
-        "billing_country": address.country,
-        "billing_email": user.email,
-        "billing_phone": str(address.mobile)[-10:],
-
-        "shipping_customer_name": address.fullname,
-        "shipping_last_name": "",
-        "shipping_address": address.address1,
-        "shipping_address_2": address.address2 or "",
-        "shipping_city": address.city,
-        "shipping_pincode": address.pincode,
-        "shipping_state": address.state,
-        "shipping_country": address.country,
-        "shipping_email": user.email,
-        "shipping_phone": str(address.mobile)[-10:],
-
-        # ✅ ADD THIS BACK
-        "shipping_is_billing": True,
-
-        "order_items": [
-            {
-                "name": item.product_name or "Product",
-                "sku": item.product_sku or "SKU123",
-                "units": item.quantity,
-                "selling_price": float(item.price)
-            }
-            for item in order.items.all()
-        ],
-
-        "payment_method": "Prepaid",
-        "sub_total": float(order.total_amount),
-
-        "length": 10,
-        "breadth": 10,
-        "height": 10,
-        "weight": 0.5
-    }
-
-    response = requests.post(url, json=payload, headers=headers)
-
-    print("Shiprocket Order Response:", response.text)
-    print("FINAL PAYLOAD:", payload)
-
-    return response.json()
-
-
-
-import requests
-import random
-
-def assign_courier_awb_dummy(order):
-    fake_awb = "AWB" + str(random.randint(10000000, 99999999))
-
-    order.tracking_id = fake_awb
-    order.courier_name = "ShippRocket (Dummy)"
-    order.shipping_status = "shipped"
-    order.shipped_at = timezone.now()
-    order.save()
-
-    print("✅ Dummy AWB:", fake_awb)
-
-    return {
-        "awb_code": fake_awb,
-        "courier_name": "ShippRocket"
-    }
-
-
+# --------- ship rocket  -----------#

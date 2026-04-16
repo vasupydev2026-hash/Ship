@@ -1,79 +1,89 @@
 from django.contrib import admin
-from .models import Order, OrderItem ,ReturnRequest
+from django.utils import timezone
+from .models import Order, OrderItem, ReturnRequest
 
 
-# --- Inline Order Items inside Order Admin ---
-
+# =========================
+# ORDER ITEM INLINE
+# =========================
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 0
-    readonly_fields = ('product', 'size', 'quantity', 'price')
+    readonly_fields = (
+        "product",
+        "product_name",
+        "size",
+        "quantity",
+        "price",
+        "status",
+    )
     can_delete = False
 
 
-# --- Order Admin ---
-
+# =========================
+# ORDER ADMIN
+# =========================
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
+
     list_display = (
-        'order_code',
-        'user',
-        'payment_method',
-        'payment_status',
-        'order_status_display',  # ✅ USE METHOD HERE
-        'courier_name',
-        'tracking_id',
-        'grand_total',
-        'created_at'
+        "order_code",
+        "user",
+        "payment_method",
+        "payment_status",
+        "status",
+        "grand_total",
+        "shiprocket_order_id",
+        "shiprocket_shipment_id",
+        "awb_code",
+        "created_at",
     )
 
     list_filter = (
-        'payment_status',
-        'status',
-        'payment_method',
-        'courier_name',
-        'created_at',
+        "payment_status",
+        "payment_method",
+        "status",
+        "created_at",
     )
 
     search_fields = (
-        'order_code',
-        'user__username',
-        'user__email',
-        'razorpay_order_id',
-        'razorpay_payment_id',
+        "order_code",
+        "user__username",
+        "user__email",
+        "razorpay_order_id",
+        "razorpay_payment_id",
+        "shiprocket_order_id",
+        "shiprocket_shipment_id",
     )
 
     readonly_fields = (
-        'order_code',
-        'user',
-        'address',
-        'total_amount',
-        'tax_amount',
-        'delivery_charges',
-        'grand_total',
+        "order_code",
+        "user",
+        "address",
 
-        # Payment
-        'payment_method',
-        'razorpay_order_id',
-        'razorpay_payment_id',
-        'payment_status',
+        # amounts
+        "total_amount",
+        "tax_amount",
+        "delivery_charges",
+        "grand_total",
 
-        # Shipping
-        'courier_name',
-        'tracking_id',
-        'shipment_created_at',
-        'shipped_at',
-        'delivered_at',
+        # payment
+        "payment_method",
+        "payment_status",
+        "razorpay_order_id",
+        "razorpay_payment_id",
 
-        # Meta
+        # shipping (SHIPROCKET)
+        "shiprocket_order_id",
+        "shiprocket_shipment_id",
+        "awb_code",
+
+        # status
         "status",
-        'created_at',
+        "created_at",
+        "updated_at",
+        "paid_at",
     )
-
-    def order_status_display(self, obj):
-        return obj.get_status_display()
-
-    order_status_display.short_description = "Order Status"
 
     inlines = [OrderItemInline]
 
@@ -81,51 +91,58 @@ class OrderAdmin(admin.ModelAdmin):
         ("Order Info", {
             "fields": ("order_code", "user", "address", "created_at")
         }),
+
         ("Amount Details", {
             "fields": ("total_amount", "tax_amount", "delivery_charges", "grand_total")
         }),
+
         ("Payment Details", {
             "fields": ("payment_method", "payment_status", "razorpay_order_id", "razorpay_payment_id")
         }),
-        ("Shipping Details", {
-            "fields": (
-                "courier_name",
-                "tracking_id",
-                "shipment_created_at",
-                "shipped_at",
-                "delivered_at",
-            )
+
+        ("Shipping Details (Shiprocket)", {
+            "fields": ("shiprocket_order_id", "shiprocket_shipment_id", "awb_code")
         }),
-        ("Order Status", {
+
+        ("Status", {
             "fields": ("status",)
         }),
     )
 
+    def order_status_display(self, obj):
+        return obj.get_status_display()
+
+    order_status_display.short_description = "Order Status"
 
 
-
-from django.contrib import admin
-from django.utils import timezone
-from .models import ReturnRequest
-
+# =========================
+# RETURN ADMIN
+# =========================
 @admin.register(ReturnRequest)
 class ReturnRequestAdmin(admin.ModelAdmin):
+
     list_display = (
         "order",
         "item",
         "status",
-        "return_waybill",
         "quantity",
         "refund_amount",
+        "return_waybill",
         "created_at",
-        "approved_at",
-        "pickup_scheduled_at",
-        "picked_up_at",
-        "received_at",
         "refunded_at",
     )
-    list_filter = ("status", "courier_name")
-    search_fields = ("order__order_code", "return_waybill", "item__product__name")
+
+    list_filter = (
+        "status",
+        "courier_name",
+    )
+
+    search_fields = (
+        "order__order_code",
+        "item__product__name",
+        "return_waybill",
+    )
+
     readonly_fields = (
         "order",
         "item",
@@ -134,52 +151,45 @@ class ReturnRequestAdmin(admin.ModelAdmin):
         "courier_name",
         "return_waybill",
         "refund_amount",
+        "status",
         "created_at",
         "approved_at",
         "pickup_scheduled_at",
         "picked_up_at",
         "received_at",
         "refunded_at",
-        "status",
     )
 
     actions = ["approve_return"]
 
     def approve_return(self, request, queryset):
-        """
-        Admin action to approve return requests, schedule pickup, and process refund
-        """
+
         from orders.delhivery import create_return_shipment
 
         for ret in queryset:
+
             if ret.status == "requested":
-                # 1️⃣ Approve
+
                 ret.status = "approved"
                 ret.approved_at = timezone.now()
-                ret.save(update_fields=["status", "approved_at"])
+                ret.save()
 
-                # 2️⃣ Schedule pickup (test mode will skip Delhivery call)
                 try:
                     create_return_shipment(ret)
                 except Exception as e:
                     self.message_user(
                         request,
-                        f"Error scheduling pickup for ReturnRequest {ret.id}: {e}",
+                        f"Pickup error: {e}",
                         level="error"
                     )
 
-                # 3️⃣ Process refund immediately (optional: can do after delivery confirmation)
                 ret.refund_amount = ret.item.price * ret.quantity
                 ret.status = "refunded"
                 ret.refunded_at = timezone.now()
-                ret.save(update_fields=["refund_amount", "status", "refunded_at"])
+                ret.save()
 
-                # 4️⃣ Recalculate order totals
                 ret.order.recalculate_totals()
 
-                self.message_user(
-                    request,
-                    f"ReturnRequest {ret.id} approved, pickup scheduled, and refund processed."
-                )
+        self.message_user(request, "Return processed successfully.")
 
-    approve_return.short_description = "Approve, Schedule Pickup & Refund"
+    approve_return.short_description = "Approve & Refund Return"
