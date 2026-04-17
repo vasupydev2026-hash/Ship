@@ -170,14 +170,17 @@ SHIPROCKET_PASSWORD = "Sudha@2001"
 SHIPROCKET_BASE_URL = "https://apiv2.shiprocket.in/v1/external"
 
 # CELERY CONFIG
+import os
 
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+CELERY_BROKER_URL = os.environ.get("REDIS_URL")
+CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL")
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
+
 CELERY_TIMEZONE = 'Asia/Kolkata'
 
 # settings.py
+
 
 
 # Redis cache (for token)
