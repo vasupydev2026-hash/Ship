@@ -13,4 +13,5 @@ Pillow
 WeasyPrint
 razorpay
 celery
+redis
 
